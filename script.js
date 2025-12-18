@@ -1,3 +1,4 @@
+// ================== ELEMENT SELECTION ==================
 let prompt = document.querySelector("#prompt")
 let submitbtn = document.querySelector("#submit")
 let chatContainer = document.querySelector(".chat-container")
@@ -5,30 +6,32 @@ let imagebtn = document.querySelector("#image")
 let image = document.querySelector("#image img")
 let imageinput = document.querySelector("#image input")
 
+// ⚠️ WARNING: API key should be moved to backend in real projects
+const Api_Url =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyB2D93Jdy1-D8sWTcw_QAOwaMx2wX28qD0"
 
-const Api_Url =  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyDX_CaDTL1rPR-ysVbNO3Bi5tCCWi37zeY"
-
+// ================== USER DATA ==================
 let user = {
-  message: null,
+  message: "",
   file: {
     mime_type: null,
     data: null
   }
 }
 
-// improved generateResponse with error propagation and response.ok check
+// ================== AI RESPONSE FUNCTION ==================
 async function generateResponse(aiChatBox) {
   let text = aiChatBox.querySelector(".ai-chat-area")
+
   const RequestOption = {
     method: "POST",
-    headers: { 'Content-Type': 'application/json' },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      // keep the structure you expect; check API docs if needed
       contents: [
         {
           parts: [
-            { text: user.message || "" },
-            ...(user.file && user.file.data ? [{ inline_data: user.file }] : [])
+            { text: user.message },
+            ...(user.file.data ? [{ inline_data: user.file }] : [])
           ]
         }
       ]
@@ -38,39 +41,43 @@ async function generateResponse(aiChatBox) {
   try {
     const response = await fetch(Api_Url, RequestOption)
 
-    // Better debugging: if response isn't ok, read and throw the body so catch can show it
     if (!response.ok) {
-      const bodyText = await response.text()
-      throw new Error(`HTTP ${response.status}: ${bodyText}`)
+      const errText = await response.text()
+      throw new Error(`HTTP ${response.status} : ${errText}`)
     }
 
     const data = await response.json()
 
-    // defensive checks for expected shape
     if (!data?.candidates?.length) {
-      throw new Error("No candidates returned by API. Response: " + JSON.stringify(data))
+      throw new Error("No response from AI")
     }
 
-    let apiResponse = (data.candidates[0].content?.parts?.[0]?.text || "")
-      .replace(/\*\*(.*?)\*\*/g, "$1")
+    // ✅ SAFER RESPONSE HANDLING
+    let apiResponse = data.candidates[0].content.parts
+      .map(p => p.text || "")
+      .join("")
       .trim()
 
-    text.innerHTML = apiResponse || "(no text returned)"
+    text.innerHTML = apiResponse || "(No text returned)"
+
+    // reset file only on success
+    user.file = { mime_type: null, data: null }
+    image.src = "img.svg"
+    image.classList.remove("choose")
   }
   catch (error) {
-    console.error("Generate error:", error)
-    // show error inside the ai chat box so you see it in the UI
-    text.innerHTML = `<div style="color:crimson">Error: ${String(error).replace(/</g,'&lt;')}</div>`
+    console.error(error)
+    text.innerHTML = `<span style="color:red">Error: ${error.message}</span>`
   }
   finally {
-    chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: "smooth" })
-    // reset the UI selection image & user.file (keep same shape)
-    image.src = `img.svg`
-    image.classList.remove("choose")
-    user.file = { mime_type: null, data: null }
+    chatContainer.scrollTo({
+      top: chatContainer.scrollHeight,
+      behavior: "smooth"
+    })
   }
 }
 
+// ================== CHAT BOX CREATOR ==================
 function createChatBox(html, classes) {
   let div = document.createElement("div")
   div.innerHTML = html
@@ -78,51 +85,54 @@ function createChatBox(html, classes) {
   return div
 }
 
+// ================== USER MESSAGE HANDLER ==================
 function handlechatResponse(userMessage) {
-  user.message = userMessage
-  let html = `<img src="user.png" alt="" id="userImage" width="8%">
-<div class="user-chat-area">
-${escapeHtml(user.message || "")}
-${user.file && user.file.data ? `<img src="data:${user.file.mime_type};base64,${user.file.data}" class="chooseimg" />` : ""}
-</div>`
-  prompt.value = ""
-  let userChatBox = createChatBox(html, "user-chat-box")
-  chatContainer.appendChild(userChatBox)
+  if (!userMessage.trim()) return   // ❌ prevent empty messages
 
-  chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: "smooth" })
+  user.message = userMessage.trim()
+
+  let html = `
+    <img src="user.png" width="8%">
+    <div class="user-chat-area">
+      ${escapeHtml(user.message)}
+      ${
+        user.file.data
+          ? `<img src="data:${user.file.mime_type};base64,${user.file.data}" class="chooseimg">`
+          : ""
+      }
+    </div>
+  `
+
+  prompt.value = ""
+  chatContainer.appendChild(createChatBox(html, "user-chat-box"))
 
   setTimeout(() => {
-    let html = `<img src="ai.png" alt="" id="aiImage" width="10%">
-    <div class="ai-chat-area">
-      <img src="loading.webp" alt="" class="load" width="50px">
-    </div>`
-    let aiChatBox = createChatBox(html, "ai-chat-box")
+    let aiHtml = `
+      <img src="ai.png" width="10%">
+      <div class="ai-chat-area">
+        <img src="loading.webp" width="50px">
+      </div>
+    `
+    let aiChatBox = createChatBox(aiHtml, "ai-chat-box")
     chatContainer.appendChild(aiChatBox)
     generateResponse(aiChatBox)
-  }, 600)
+  }, 500)
 }
 
-// tiny helper to avoid XSS when inserting user text
-function escapeHtml(unsafe) {
-  if (!unsafe) return ""
-  return unsafe.replace(/[&<>"'`=\/]/g, function(s) {
-    return ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-      '/': '&#x2F;',
-      '`': '&#x60;',
-      '=': '&#x3D;'
-    })[s]
-  })
+// ================== HTML ESCAPE (XSS SAFE) ==================
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, c => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c])
 }
 
-
-// events
-prompt.addEventListener("keydown", (e) => {
-  if (e.key == "Enter") {
+// ================== EVENTS ==================
+prompt.addEventListener("keydown", e => {
+  if (e.key === "Enter") {
     e.preventDefault()
     handlechatResponse(prompt.value)
   }
@@ -132,31 +142,34 @@ submitbtn.addEventListener("click", () => {
   handlechatResponse(prompt.value)
 })
 
+// ================== IMAGE UPLOAD ==================
 imageinput.addEventListener("change", () => {
   const file = imageinput.files[0]
   if (!file) return
-  let reader = new FileReader()
-  reader.onload = (e) => {
-    let base64string = e.target.result.split(",")[1]
-    // crucial: set actual mime_type from file.type
-    user.file = { mime_type: file.type || "application/octet-stream", data: base64string }
-    image.src = `data:${user.file.mime_type};base64,${user.file.data}`
+
+  // ✅ validate file
+  if (!file.type.startsWith("image/")) {
+    alert("Only image files allowed")
+    return
+  }
+
+  if (file.size > 2 * 1024 * 1024) {
+    alert("Image must be under 2MB")
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = e => {
+    user.file = {
+      mime_type: file.type,
+      data: e.target.result.split(",")[1]
+    }
+    image.src = e.target.result
     image.classList.add("choose")
   }
   reader.readAsDataURL(file)
 })
 
 imagebtn.addEventListener("click", () => {
-  imagebtn.querySelector("input").click()
+  imageinput.click()
 })
-
-
-
-
-
-
-
-
-
-
-
